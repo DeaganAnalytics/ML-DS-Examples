@@ -1,0 +1,215 @@
+---
+title: "K-Prototypes Segmentation Model"
+output: html_document
+---
+
+This file is a simplified version of a model I built using K-Prototypes and K Nearest Neighbours to segment properties based on property information and water usage data.
+
+# Load packages and create functions
+```{r setup, include=FALSE}
+library(dplyr)
+library(clustMixType)
+library(VIM)
+
+# Function to set 20% of columns to NAs
+set_na_pct <- function(x, pct = 0.2) {
+  n <- length(x)
+  na_indices <- sample(n, size = floor(pct * n))
+  x[na_indices] <- NA
+  x
+}
+
+# Create min_max_normalise function
+min_max_normalise <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+# Create de-normalise function
+de_normalise <- function(x_scaled, x_original) {
+  min_val <- min(x_original, na.rm = TRUE)
+  max_val <- max(x_original, na.rm = TRUE)
+  return(x_scaled * (max_val - min_val) + min_val)
+}
+
+# Create a helper function to access original data
+de_normalise_helper <- function(scaled_col, original_col) {
+  return(de_normalise(scaled_col, original_col))
+}
+```
+
+# Set seed for reproducibility 
+```{r}
+set.seed(1)
+```
+
+# Generate random dataset
+```{r}
+# Number of observations
+n <- 1000
+
+# Create multipler for water use
+land_use_multipliers <- c("House" = 1, "Rural Residential" = 1.5, "Units" = 0.7, "Flats" = 0.5)
+
+dummy_df <- tibble(
+  property_number = paste0("P", sprintf("%05d", 1:n))
+) %>%
+  mutate(
+    land_use_type = sample(
+      c("House", "Rural Residential", "Units", "Flats"),
+      size = n,
+      replace = TRUE,
+      prob = c(0.6, 0.1, 0.2, 0.1)
+    ),
+    land_use_type = factor(land_use_type, levels = c("House", "Rural Residential", "Units", "Flats"))
+  ) %>%
+  group_by(land_use_type) %>%
+  mutate(
+    parcel_area = round(case_when(
+      land_use_type == "House" ~ rlnorm(n(), log(700), sdlog = 0.2),
+      land_use_type == "Rural Residential" ~ rlnorm(n(), log(4000), sdlog = 1),
+      land_use_type == "Units" ~ rlnorm(n(), log(350), sdlog = 0.5),
+      land_use_type == "Flats" ~ rlnorm(n(), log(200), sdlog = 0.4),
+      TRUE ~ NA_real_
+    )),
+    number_of_bedrooms = case_when(
+      land_use_type == "House" ~ sample(2:4, n(), replace = TRUE, prob = c(0.3, 0.5, 0.2)),
+      land_use_type == "Rural Residential" ~ sample(2:4, n(), replace = TRUE, prob = c(0.2, 0.5, 0.3)),
+      land_use_type == "Units" ~ sample(1:3, n(), replace = TRUE, prob = c(0.5, 0.4, 0.1)),
+      land_use_type == "Flats" ~ sample(1:2, n(), replace = TRUE, prob = c(0.8, 0.2)),
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  ungroup() %>%
+  mutate(
+    parcel_scaled = as.numeric(scale(parcel_area)),
+    base_water = rnorm(n, mean = 0.5 + 0.015 * parcel_scaled, sd = 0.6),
+    base_water = pmax(base_water, 0.001),
+    avg_daily_water_consumption = round(base_water * land_use_multipliers[land_use_type], 4)
+  ) %>%
+  select(-parcel_scaled, -base_water) %>%
+  mutate(across(-property_number, ~ set_na_pct(.x, pct = 0.2))) # Set 20% of non-id columns as NA
+```
+
+# Impute missing data using K Nearest Neighbours
+```{r}
+# Remove id column
+impute_imput <- dummy_df %>% 
+  select(-property_number)
+
+# Impute missing variables
+imputed_features <- kNN(impute_imput, k = 5, imp_var = FALSE)
+```
+
+# Run K-Prototypes model 
+```{r}
+# Normalise data for model
+normalised_features <- imputed_features %>% 
+   mutate(across(where(is.numeric), min_max_normalise))
+
+# Optional, choose a k value using the elbow method
+wcss <- numeric()
+
+for (k in 1:10) {  # Try different K values
+  model <- kproto(normalised_features, k)
+  wcss[k] <- sum(model$withinss)
+}
+
+plot(1:10, wcss, type = "b", pch = 19, frame = FALSE,
+     xlab = "Number of Clusters", ylab = "WCSS",
+     main = "Elbow Method for Optimal K")
+
+# Run K-Prototypes model
+kproto_model <- kproto(normalised_features, k = 5, nstart = 25)
+```
+
+# Evaluate model
+```{r}
+# Check the cost function value (lower is better)
+kproto_model$tot.withinss
+
+# Cluster distribution (balanced is better)
+table(kproto_model$cluster)
+
+# Calculate average intra-cluster distance (lower is better)
+mean(kproto_model$dists)
+```
+
+# De-Normalise the outputs for interpretation
+```{r}
+# Specify model and input data frame
+model_name <- kproto_model
+input_df <- normalised_features
+
+# Set up summary object
+summary_output <- summary(model_name)
+
+# Create list of numeric and character (factor) variables to process
+numeric_vars <- colnames(input_df)[sapply(input_df, is.numeric)]
+character_vars <- colnames(input_df)[sapply(input_df, is.factor)]
+
+# Initialise an empty list to store results
+summary_list <- list()
+
+# Get number of clusters
+num_clusters <- length(unique(model_name$cluster))
+
+# Loop through numeric vars
+for (var in numeric_vars) {
+  
+  summary_var <- summary_output[[var]]
+  
+  # Convert to data frame (some summaries may already be data frames, some may be matrices)
+  df <- as.data.frame(summary_var)
+  
+  # Rename columns if needed
+  colnames(df) <- c("Min.", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max.")
+  
+  # Set row names dynamically
+  rownames(df) <- paste("Cluster", seq_len(nrow(df)))
+  
+  # De-normalise values
+  df_denorm <- df %>%
+    mutate(across(where(is.numeric), 
+                  ~de_normalise_helper(., dummy_df[[var]])))
+  
+  # Store result
+  summary_list[[var]] <- df_denorm
+}
+
+# Loop through the list of character variables
+for (var in character_vars) {
+  
+  # Extract the summary for the current character variable from kproto result
+  summary_var <- summary_output[[var]]
+  
+  # Convert the summary to a data frame (this will show the counts/frequencies)
+  df <- as.data.frame(summary_var)
+  
+  # Reshape the data into a wider format where each category (Var2) becomes a column
+  df_wide <- df %>%
+    pivot_wider(names_from = Var2, values_from = Freq, values_fill = list(Freq = 0))  # Fill missing with 0 if any category is missing
+  
+  # Add a column for cluster identification (instead of using row names)
+  df_wide$cluster <- paste("Cluster", df_wide$cluster)
+  
+  # Reorder columns so that 'cluster' is the first column
+  df_wide <- df_wide %>%
+    select(cluster, everything())
+  
+  # Convert the tibble to a regular data frame
+  df_wide <- as.data.frame(df_wide)
+  
+  # Store the result in the list
+  summary_list[[var]] <- df_wide
+}
+
+# View the clustering result
+print(summary_list)
+```
+
+# Add clusters to original data
+```{r}
+clustered_data <- dummy_df %>% 
+  mutate(cluster = kproto_model$cluster) %>% 
+  select(property_number, cluster, everything())
+```
