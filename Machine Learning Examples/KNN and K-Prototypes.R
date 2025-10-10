@@ -1,12 +1,6 @@
----
-title: "K-Prototypes Segmentation Model"
-output: html_document
----
-
-This file is a simplified version of a model I built using K-Prototypes and K Nearest Neighbours to segment properties based on property information and water usage data.
+# This file is a simplified version of a model I built using K-Prototypes and K Nearest Neighbours to segment properties based on property information and water usage data.
 
 # Load packages and create functions
-```{r setup, include=FALSE}
 library(dplyr)
 library(clustMixType)
 library(VIM)
@@ -35,15 +29,11 @@ de_normalise <- function(x_scaled, x_original) {
 de_normalise_helper <- function(scaled_col, original_col) {
   return(de_normalise(scaled_col, original_col))
 }
-```
 
 # Set seed for reproducibility 
-```{r}
 set.seed(1)
-```
 
 # Generate random dataset
-```{r}
 # Number of observations
 n <- 1000
 
@@ -88,20 +78,16 @@ dummy_df <- tibble(
   ) %>%
   select(-parcel_scaled, -base_water) %>%
   mutate(across(-property_number, ~ set_na_pct(.x, pct = 0.2))) # Set 20% of non-id columns as NA
-```
 
 # Impute missing data using K Nearest Neighbours
-```{r}
 # Remove id column
 impute_imput <- dummy_df %>% 
   select(-property_number)
 
 # Impute missing variables
 imputed_features <- kNN(impute_imput, k = 5, imp_var = FALSE)
-```
 
 # Run K-Prototypes model 
-```{r}
 # Normalise data for model
 normalised_features <- imputed_features %>% 
    mutate(across(where(is.numeric), min_max_normalise))
@@ -120,10 +106,8 @@ plot(1:10, wcss, type = "b", pch = 19, frame = FALSE,
 
 # Run K-Prototypes model
 kproto_model <- kproto(normalised_features, k = 5, nstart = 25)
-```
 
 # Evaluate model
-```{r}
 # Check the cost function value (lower is better)
 kproto_model$tot.withinss
 
@@ -132,10 +116,8 @@ table(kproto_model$cluster)
 
 # Calculate average intra-cluster distance (lower is better)
 mean(kproto_model$dists)
-```
 
 # De-Normalise the outputs for interpretation
-```{r}
 # Specify model and input data frame
 model_name <- kproto_model
 input_df <- normalised_features
@@ -205,11 +187,9 @@ for (var in character_vars) {
 
 # View the clustering result
 print(summary_list)
-```
+
 
 # Add clusters to original data
-```{r}
 clustered_data <- dummy_df %>% 
   mutate(cluster = kproto_model$cluster) %>% 
   select(property_number, cluster, everything())
-```
