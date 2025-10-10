@@ -1,10 +1,4 @@
----
-title: "Regex Classification: Example"
-output: html_document
----
-
 # Load packages and functions
-```{r setup, include=FALSE}
 library(stringr)
 library(dplyr)
 library(tidyr)
@@ -16,15 +10,11 @@ source("read_sql.R") # see https://github.com/DeaganAnalytics/Personal-Automatio
 source("clean_df.R") # see https://github.com/DeaganAnalytics/Personal-Automation/blob/main/R/Functions/clean_df.R
 
 folder_path <- "C:/Git/ML-DS-Examples/Regex PII Classification/table_samples"
-```
 
 # Import data
-```{r}
 column_names <- read_sql(con_name, "information_schema.sql", folder = "local") # see https://github.com/DeaganAnalytics/Personal-Automation/blob/main/R/Functions/server_connection.R for con_name
-```
 
 # Regex on column names
-```{r}
 # Clean column names data frame
 columns_df <- column_names %>% 
   clean_df() %>%
@@ -166,15 +156,11 @@ col_name_matches <- columns_df %>%
   mutate(column_matched = if_any(4:ncol(.), ~ .x)) %>% 
   relocate(column_matched, .after = data_type) %>% 
   select(table, column_name, data_type, column_matched, names, addresses, emails, phone_number, financial_details, business, gender, birthday)
-```
 
 # Get sample data from each table - eval = FALSE as this only needs to be run once, and takes quite a while
-```{r, eval = FALSE}
 source("C:/Git/ML-DS-Examples/Regex PII Classification/02_get_sample_data.R")
-```
 
 # Load rds files
-```{r}
 # List all .rds files in the folder, get full paths
 files <- list.files(folder_path, pattern = "\\.rds$", full.names = TRUE)
 
@@ -253,10 +239,8 @@ regex_matches <- purrr::map_df(samples_by_table, check_patterns_pct) %>%
   mutate(phone_combined = pmax(mobile_number_spacing, phone_number_spacing, na.rm = TRUE),
          address_combined = pmax(state_postcode, lots_units, streets, na.rm = TRUE)) %>% 
   select(-mobile_number_spacing, -phone_number_spacing, -state_postcode, -lots_units, -streets)
-```
 
 # Joining the two dfs together
-```{r}
 # Define the list of logical category column names
 logical_cols <- c("names", "addresses", "email", "phone_numbers", "financial_details", "business", "gender", "birthday", "potential_pii")
 
@@ -300,4 +284,3 @@ categorised_regex_matches <- regex_matches %>%
 final_regex <- categorised_col_names %>% 
   left_join(categorised_regex_matches, by = c("table" = "source_table", "column_name" = "column")) %>% 
   mutate(any_match = !is.na(colname_match) | !is.na(best_match))
-```
