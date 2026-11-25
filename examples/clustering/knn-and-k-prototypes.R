@@ -169,7 +169,7 @@ for (var in character_vars) {
   
   # Reshape the data into a wider format where each category (Var2) becomes a column
   df_wide <- df %>%
-    pivot_wider(names_from = Var2, values_from = Freq, values_fill = list(Freq = 0))  # Fill missing with 0 if any category is missing
+    tidyr::pivot_wider(names_from = Var2, values_from = Freq, values_fill = list(Freq = 0))  # Fill missing with 0 if any category is missing
   
   # Add a column for cluster identification (instead of using row names)
   df_wide$cluster <- paste("Cluster", df_wide$cluster)
